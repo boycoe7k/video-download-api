@@ -203,6 +203,7 @@ For production, store keys in a database/secret manager rather than relying on `
 ## Production notes
 
 - Put the API behind HTTPS.
+- The server includes a small CORS middleware that echoes the request `Origin` (and handles preflight), so browsers can call the API directly from any frontend. Preflight is answered with `204`.
 - Use a long random API key.
 - Keep `storage/` outside the public web root.
 - Add a reverse proxy such as Nginx or a managed HTTPS gateway.
