@@ -59,13 +59,16 @@ docker compose up -d --build
 
 ## Authentication
 
-Send:
+The API supports two modes, controlled by the `API_KEYS` environment variable:
+
+**Open mode (no key needed):** if `API_KEYS` is empty or not set, all endpoints work without authentication (only `/api/admin/*` still requires `ADMIN_KEY`). This is convenient for personal or internal deployments behind a private URL.
+
+**Keyed mode:** if `API_KEYS` is set, every `/api/*` endpoint except `/api/health` requires:
 
 ```text
 x-api-key: YOUR_API_KEY
 ```
 
-on every `/api/*` endpoint except `/api/health`.
 
 ## Unified endpoints (recommended)
 
@@ -153,7 +156,9 @@ Do not expose the API key inside client-side code or public WhatsApp messages.
 
 ## Multiple API keys
 
-Set several keys in `.env`, separated by commas:
+In **open mode** (no `API_KEYS` set), no client key is required and all endpoints work without authentication. Admin endpoints always require `ADMIN_KEY`.
+
+In **keyed mode**, set several keys in `.env`, separated by commas:
 
 ```env
 API_KEYS=Nexora_7Kp9xQ4mV8zL2nR6,Nexora_B4xT8pLm2Qw7Yk9C
@@ -192,6 +197,8 @@ x-admin-key: YOUR_ADMIN_KEY
 ```
 
 For production, store keys in a database/secret manager rather than relying on `.env`, and use HTTPS.
+
+> **Tip:** leaving `API_KEYS` empty is a deliberate convenience for personal deployments behind a private URL (e.g. an unlisted Render or Railway endpoint). If your instance is publicly reachable, set at least one key to prevent abuse, since downloads consume bandwidth.
 
 ## Production notes
 

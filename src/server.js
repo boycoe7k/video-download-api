@@ -38,8 +38,11 @@ const limiter = rateLimit({
 app.use("/api/", limiter);
 
 function auth(req, res, next) {
+  // If no API_KEYS are configured, the API runs in open mode (no key
+  // required). When keys are configured, only valid enabled keys pass.
   if (!API_KEYS.length) {
-    return res.status(500).json({ success: false, error: "API_KEYS is not configured" });
+    req.apiKey = null;
+    return next();
   }
 
   const supplied = req.get("x-api-key") || "";
