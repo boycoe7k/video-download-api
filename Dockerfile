@@ -13,7 +13,10 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends python3-pip curl \
   && curl -fsSL https://deno.land/install.sh | sh \
   && cp /root/.deno/bin/deno /usr/local/bin/ \
-  && pip3 install --no-cache-dir --break-system-packages --pre -i https://pypi.anaconda.org/yt-dlp-nightly-builds/simple yt-dlp \
+  && NIGHTLY_TAG=$(curl -fsSL https://api.github.com/repos/yt-dlp/yt-dlp-nightly-builds/releases/latest 2>/dev/null | grep '"tag_name"' | sed 's/.*"\(.*\)".*/\1/' || echo "") && \
+  NIGHTLY_TAG=${NIGHTLY_TAG:-"2026.08.19.233000"} && \
+  pip3 install --no-cache-dir --break-system-packages \
+    "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/download/${NIGHTLY_TAG}/yt-dlp.tar.gz" \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
