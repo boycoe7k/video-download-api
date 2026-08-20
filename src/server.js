@@ -153,11 +153,14 @@ async function mediaInfo(url, type) {
       "--no-playlist",
       "--skip-download",
       "--no-warnings",
-      "--extractor-retries", "3",
-      "--socket-timeout", "15",
+      "--extractor-retries", "5",
+      "--socket-timeout", "20",
+      "--sleep-interval", "1",
+      "--max-sleep-interval", "4",
     ];
   const proxy = process.env.YTDLP_PROXY || "";
   if (proxy) args.push("--proxy", proxy);
+  args.push("--extractor-args", "youtube:player_skip=webpage,config,js");
   if (client) {
     args.push("--extractor-args", `${platform}:player_client=${client}`);
   }
@@ -169,7 +172,7 @@ async function mediaInfo(url, type) {
       lastErr = err;
       const msg = err.message || "";
       if (/(sign in|not a bot|reloaded|timed out|blocked|403|429)/i.test(msg)) {
-        await new Promise(r => setTimeout(r, 1500 + Math.random() * 2000));
+        await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
         continue;
       }
       throw err;
@@ -213,12 +216,13 @@ async function downloadAuthorized(url, job, type, quality) {
       "--newline",
       "-f", format,
       "-o", output,
-      "--extractor-retries", "3",
-      "--socket-timeout", "15",
+      "--extractor-retries", "5",
+      "--socket-timeout", "20",
       "--retries", "5",
       "--fragment-retries", "5",
       "--sleep-interval", "2",
       "--max-sleep-interval", "8",
+      "--extractor-args", "youtube:player_skip=webpage,config,js",
       url
     ];
     if (!isAudio) {
