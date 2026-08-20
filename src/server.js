@@ -178,17 +178,91 @@ function probeProxy(proxyUrl) {
   });
 }
 
+// Cache of proxies that were actually tested end-to-end (CONNECT + HTTP GET
+// through the proxy). A proxy that connects but returns 403/5xx for the
+// target gets marked bad for 15 minutes so it is not retried repeatedly.
+const badProxies = new Map();
+const PROXY_BAD_TTL = 15 * 60_000;
+
+async function verifyProxyFunctionally(proxyUrl) {
+  // Functional check: route an actual HTTPS GET to the target platform
+  // through the proxy. If the proxy itself works but the target 403s, that
+  // tells us the proxy's IP is also bad — skip it and try the next.
+  // Raw CONNECT over a plain TCP socket (https.request would incorrectly
+  // perform a TLS handshake against the proxy itself), then TLS + HTTP GET
+  // through the tunnel to confirm the target responds.
+  return new Promise(resolve => {
+    try {
+      const net = require("net");
+      const tls = require("tls");
+      const u = new URL(proxyUrl);
+      const sock = net.connect(Number(u.port), u.hostname, () => {
+        sock.write(
+          `CONNECT www.youtube.com:443 HTTP/1.1\r\nHost: www.youtube.com:443\r\n\r\n`
+        );
+      });
+      let buf = "";
+      sock.on("data", data => {
+        buf += data.toString();
+        if (/HTTP\/1\.\d 2\d\d/.test(buf)) {
+          const tlsSock = tls.connect(
+            { host: "www.youtube.com", servername: "www.youtube.com", socket: sock },
+            () => {
+              tlsSock.write(
+                "GET / HTTP/1.1\r\nHost: www.youtube.com\r\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36\r\nAccept: text/html\r\nConnection: close\r\n\r\n"
+              );
+              let tbuf = "";
+              tlsSock.on("data", d => {
+                tbuf += d.toString();
+                const match = tbuf.match(/HTTP\/1\.\d (\d+)/);
+                if (match) {
+                  tlsSock.destroy();
+                  // 403 from the target means this proxy's IP is banned too.
+                  resolve(match[1] === "403" ? "banned" : true);
+                }
+                if (tbuf.length > 2000) { tlsSock.destroy(); resolve(true); }
+              });
+              tlsSock.on("error", () => resolve(false));
+              setTimeout(() => { tlsSock.destroy(); resolve(false); }, 8000);
+            }
+          );
+          tlsSock.on("error", () => resolve(false));
+          setTimeout(() => { tlsSock.destroy(); resolve(false); }, 12000);
+          sock.removeAllListeners("data");
+        } else if (/HTTP\/1\.\d (?!2\d\d)/.test(buf) || buf.length > 200) {
+          sock.destroy();
+          resolve(false);
+        }
+      });
+      sock.on("error", () => resolve(false));
+      setTimeout(() => { sock.destroy(); resolve(false); }, 15000);
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
 async function pickWorkingProxy() {
   const env = process.env.YTDLP_PROXY || "";
   if (env) return env;
   const list = await getProxyList();
   if (!list.length) return "";
-  // Try the next N cached proxies in rotation until one works.
-  for (let n = 0; n < Math.min(5, list.length); n++) {
-    const proxy = list[cachedProxies.at % list.length];
+  const now = Date.now();
+  // Try up to N proxies: first require TCP-CONNECT to succeed, then require
+  // the target to respond without banning that proxy's IP either.
+  for (let n = 0; n < Math.min(6, list.length); n++) {
+    const candidate = list[cachedProxies.at % list.length];
     cachedProxies.at += 1;
-    const ok = await probeProxy(proxy);
-    if (ok) return `http://${proxy}`;
+    const bad = badProxies.get(candidate);
+    if (bad && now - bad < PROXY_BAD_TTL) continue;
+    const connectOk = await probeProxy(`http://${candidate}`);
+    if (!connectOk) continue;
+    const check = await verifyProxyFunctionally(`http://${candidate}`);
+    if (check === "banned") {
+      badProxies.set(candidate, now);
+      continue;
+    }
+    if (check) return `http://${candidate}`;
   }
   return "";
 }
