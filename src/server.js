@@ -142,7 +142,7 @@ async function mediaInfo(url, type) {
   // Facebook, and Instagram (yt-dlp is the common extractor behind them).
   const platform = detectPlatform(url);
   const clientFallbacks = pf => {
-    if (pf === "youtube") return ["android,web_embedded", "web_embedded", "tv,web_safari", null];
+    if (pf === "youtube") return ["android,web_embedded", "tv,web_safari", "web_embedded", null];
     if (pf === "tiktok") return ["tiktok", "tiktok_embedded", null];
     return [null];
   };
@@ -156,10 +156,12 @@ async function mediaInfo(url, type) {
       "--extractor-retries", "3",
       "--socket-timeout", "15",
     ];
-    if (client) {
-      args.push("--extractor-args", `${platform}:player_client=${client}`);
-    }
-    args.push(url);
+  const proxy = process.env.YTDLP_PROXY || "";
+  if (proxy) args.push("--proxy", proxy);
+  if (client) {
+    args.push("--extractor-args", `${platform}:player_client=${client}`);
+  }
+  args.push(url);
     try {
       const { stdout } = await runCommand("yt-dlp", args);
       return JSON.parse(stdout);
@@ -256,6 +258,8 @@ async function downloadAuthorized(url, job, type, quality) {
       for (let i = 0; i < attempts; i++) {
         const client = clients[i % clients.length];
         const args = baseArgs();
+        const proxy = process.env.YTDLP_PROXY || "";
+        if (proxy) args.push("--proxy", proxy);
         if (client) {
           args.push("--extractor-args", `${job.platform}:player_client=${client}`);
         }
