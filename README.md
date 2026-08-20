@@ -207,6 +207,18 @@ For production, store keys in a database/secret manager rather than relying on `
 
 > **Tip:** leaving `API_KEYS` empty is a deliberate convenience for personal deployments behind a private URL (e.g. an unlisted Render or Railway endpoint). If your instance is publicly reachable, set at least one key to prevent abuse, since downloads consume bandwidth.
 
+## Proxy support (datacenter IP blocks)
+
+YouTube, TikTok, Facebook, and Instagram routinely block cloud/datacenter IP ranges ("Your IP address is blocked from accessing this post", 403). The server mitigates this automatically: when a request is blocked, it fetches rotating public proxies, verifies each one end-to-end (connects and reaches the target platform without returning 403), and retries the download through a working proxy. Proxies whose own IPs are banned by the target are blacklisted for 15 minutes.
+
+For production consistency, automatic proxy rotation is unreliable by nature (free proxy pools are mostly datacenter ranges that targets ban too). The recommended production setup is a private HTTP/HTTPS proxy with a **residential IP**:
+
+```env
+YTDLP_PROXY=http://user:pass@host:port
+```
+
+When `YTDLP_PROXY` is set, every yt-dlp extraction goes through it and the automatic rotation is disabled. Diagnostic endpoint `GET /api/debug/proxy` reports the current proxy configuration (safe to expose publicly: no secrets are returned).
+
 ## Production notes
 
 - Put the API behind HTTPS.
