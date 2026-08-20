@@ -311,8 +311,9 @@ async function mediaInfo(url, type) {
   if (!proxy) proxy = await pickWorkingProxy().catch(() => "");
   if (proxy) args.push("--proxy", proxy);
   args.push("--extractor-args", "youtube:player_skip=webpage,config,js");
-  if (client) {
-    args.push("--extractor-args", `${platform}:player_client=${client}`);
+  // player_client is YouTube-only; other platforms have no such argument.
+  if (client && platform === "youtube") {
+    args.push("--extractor-args", `youtube:player_client=${client}`);
   }
   args.push(url);
     try {
@@ -415,8 +416,9 @@ async function downloadAuthorized(url, job, type, quality) {
         let proxy = process.env.YTDLP_PROXY || "";
         if (!proxy && i > 0) proxy = await pickWorkingProxy().catch(() => "");
         if (proxy) args.push("--proxy", proxy);
-        if (client) {
-          args.push("--extractor-args", `${job.platform}:player_client=${client}`);
+        // player_client is YouTube-only; other platforms have no such argument.
+        if (client && job.platform === "youtube") {
+          args.push("--extractor-args", `youtube:player_client=${client}`);
         }
         try {
           const stderr = await runOnce(args);
@@ -441,7 +443,7 @@ async function downloadAuthorized(url, job, type, quality) {
           lastErr = err;
           const msg = err.message || "";
           // Bot check or transient failure → try the next client after a pause.
-          if (/(sign in|not a bot|reloaded|timed out|blocked|403|429)/i.test(msg) && i < attempts - 1) {
+          if (/(sign in|not a bot|reloaded|timed out|blocked|403|429|rehydration|connection aborted|remote end closed)/i.test(msg) && i < attempts - 1) {
             console.log("[download] retry with next client after bot-check/transient error");
             await new Promise(r => setTimeout(r, 1500 + Math.random() * 2000));
             continue;
