@@ -447,6 +447,28 @@ app.get("/api/health", (req, res) => {
   });
 });
 
+// Non-sensitive diagnostics: whether a static proxy is configured, the
+// current commit-friendly build marker, and how many free proxies are
+// cached. Helps confirm a redeploy happened and whether proxy rotation is
+// armed.
+app.get("/api/debug/proxy", (req, res) => {
+  const env = process.env.YTDLP_PROXY || "";
+  res.json({
+    success: true,
+    envProxySet: env.length > 0,
+    envProxyValue: env ? env.replace(/@/, "@***").replace(/\/\/[A-Za-z0-9_.:-]+@/, "//***@") : "",
+    cachedProxyCount: cachedProxies.list.length,
+    proxyListFresh: Date.now() - cachedProxies.fetchedAt < 10 * 60_000,
+    nodeVersion: process.versions.node,
+    ytDlpVersion: require("child_process")
+      .execSync("yt-dlp --version", { encoding: "utf8" })
+      .trim(),
+    gitCommit: require("child_process")
+      .execSync("git rev-parse --short HEAD 2>/dev/null || echo unknown", { encoding: "utf8" })
+      .trim()
+  });
+});
+
 function extractMediaInfo(info, platform) {
   return {
     id: info.id,
