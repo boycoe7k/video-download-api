@@ -30,7 +30,12 @@ const API_KEYS = (process.env.API_KEYS || "")
   .split(",")
   .map(k => k.trim())
   .filter(Boolean);
-const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
+// Render sets RENDER_EXTERNAL_URL (https://<service>.onrender.com). Fall back
+// to localhost only when no external URL is advertised.
+const BASE_URL =
+  process.env.BASE_URL ||
+  process.env.RENDER_EXTERNAL_URL ||
+  `http://localhost:${PORT}`;
 
 const keyStats = new Map(API_KEYS.map(key => [
   key,
@@ -367,9 +372,10 @@ app.post("/api/media/download", auth, async (req, res) => {
 
   downloadAuthorized(url, job, type, quality)
     .catch(err => {
-      console.log("[download failed]", err && err.message);
+      const msg = (err && (err.message || String(err))) || "Unknown error";
+      console.log("[download failed]", msg);
       job.status = "failed";
-      job.error = err.message;
+      job.error = msg;
       job.expiresAt = Date.now() + JOB_TTL;
     });
 
@@ -413,9 +419,10 @@ app.post("/api/youtube/download", auth, async (req, res) => {
 
   downloadAuthorized(url, job, type, quality)
     .catch(err => {
-      console.log("[download failed]", err && err.message);
+      const msg = (err && (err.message || String(err))) || "Unknown error";
+      console.log("[download failed]", msg);
       job.status = "failed";
-      job.error = err.message;
+      job.error = msg;
       job.expiresAt = Date.now() + JOB_TTL;
     });
 
@@ -445,7 +452,8 @@ app.get("/api/status/:id", auth, (req, res) => {
     result.expiresAt = new Date(job.expiresAt).toISOString();
   }
 
-  if (job.status === "failed") result.error = "The download job failed";
+  if (job.status === "failed")
+    result.error = job.error || "The download job failed";
 
   res.json(result);
 });
