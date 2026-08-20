@@ -10,13 +10,11 @@ RUN python3 -m pip --version >/dev/null 2>&1 || true
 # nightly build, which carries the latest extractor fixes for YouTube,
 # TikTok, Instagram, and Facebook.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3-pip curl \
+  && apt-get install -y --no-install-recommends python3-pip curl unzip \
   && curl -fsSL https://deno.land/install.sh | sh \
   && cp /root/.deno/bin/deno /usr/local/bin/ \
-  && NIGHTLY_TAG=$(curl -fsSL https://api.github.com/repos/yt-dlp/yt-dlp-nightly-builds/releases/latest 2>/dev/null | grep '"tag_name"' | sed 's/.*"\(.*\)".*/\1/' || echo "") && \
-  NIGHTLY_TAG=${NIGHTLY_TAG:-"2026.08.19.233000"} && \
-  pip3 install --no-cache-dir --break-system-packages \
-    "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/download/${NIGHTLY_TAG}/yt-dlp.tar.gz" \
+  && pip3 install --no-cache-dir --break-system-packages \
+    "https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/download/2026.08.19.233000/yt-dlp.tar.gz" \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
