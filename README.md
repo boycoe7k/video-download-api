@@ -13,6 +13,13 @@ The server uses [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) as its extractor en
 | Facebook (`facebook.com`, `fb.watch`, `m.facebook.com`) | Yes | Yes | Yes |
 | Instagram (`instagram.com`, `m.instagram.com`) | Yes | Yes | Yes |
 
+## Platform reliability notes
+
+The API hardens downloads against each platform's anti-bot checks:
+
+- **YouTube:** the web client is challenged with "Sign in to confirm you're not a bot" from datacenter IPs. The server first tries the `android` + `web_embedded` players, which are not challenged, and automatically retries with `web_embedded` and then `tv`/`web_safari` on transient failures. A short random pause is inserted between requests so bursts do not look scripted. No cookies are required.
+- **TikTok / Facebook / Instagram:** these occasionally return "Your IP address is blocked from accessing this post" for certain videos on certain server IPs. The server retries with jitter, but this is a platform-side, IP-level block that cannot be fully eliminated server-side. If a video fails repeatedly, it usually downloads fine a few hours later, or from a different network. For stubborn Instagram/Facebook videos, upload a `cookies.txt` (exported from your own logged-in browser session) and pass it to yt-dlp via a small config override.
+
 ## Requirements
 
 - Node.js 20+

@@ -140,17 +140,40 @@ function runCommand(command, args) {
 async function mediaInfo(url, type) {
   // Requires yt-dlp installed on the server. Works for YouTube, TikTok,
   // Facebook, and Instagram (yt-dlp is the common extractor behind them).
-  const args = [
-    "--dump-single-json",
-    "--no-playlist",
-    "--skip-download",
-    "--no-warnings",
-    "--extractor-retries", "3",
-    "--socket-timeout", "15",
-    url
-  ];
-  const { stdout } = await runCommand("yt-dlp", args);
-  return JSON.parse(stdout);
+  const platform = detectPlatform(url);
+  const clientFallbacks = pf => {
+    if (pf === "youtube") return ["android,web_embedded", "web_embedded", "tv,web_safari", null];
+    if (pf === "tiktok") return ["tiktok", "tiktok_embedded", null];
+    return [null];
+  };
+  let lastErr = null;
+  for (const client of clientFallbacks(platform)) {
+    const args = [
+      "--dump-single-json",
+      "--no-playlist",
+      "--skip-download",
+      "--no-warnings",
+      "--extractor-retries", "3",
+      "--socket-timeout", "15",
+    ];
+    if (client) {
+      args.push("--extractor-args", `${platform}:player_client=${client}`);
+    }
+    args.push(url);
+    try {
+      const { stdout } = await runCommand("yt-dlp", args);
+      return JSON.parse(stdout);
+    } catch (err) {
+      lastErr = err;
+      const msg = err.message || "";
+      if (/(sign in|not a bot|reloaded|timed out|blocked|403|429)/i.test(msg)) {
+        await new Promise(r => setTimeout(r, 1500 + Math.random() * 2000));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr;
 }
 
 async function downloadAuthorized(url, job, type, quality) {
@@ -160,8 +183,7 @@ async function downloadAuthorized(url, job, type, quality) {
   job.status = "processing";
   job.progress = 0;
 
-  const isAudio = type === "audio";
-
+    const isAudio = type === "audio";
   // Compound selectors fall back gracefully when a platform only
   // exposes muxed formats (e.g. TikTok, Instagram, Facebook).
   const qualityNum = Number(quality) || 720;
@@ -171,67 +193,117 @@ async function downloadAuthorized(url, job, type, quality) {
       : quality === "best"
         ? "bv*+ba/b"
         : `bv*[height<=${qualityNum}]+ba/b`;
-
   // For audio extraction we pass only the audio selector to yt-dlp and
   // let it re-encode the single stream; --merge-output-format is skipped
   // because "mp3" is not a valid container for merging.
-  const args = [
-    "--no-playlist",
-    "--no-warnings",
-    "--newline",
-    "-f", format,
-    "-o", output,
-    "--extractor-retries", "3",
-    "--socket-timeout", "15",
-    "--retries", "5",
-    "--fragment-retries", "5",
-    url
-  ];
-
-  if (!isAudio) {
-    args.push("--merge-output-format", "mp4");
-  } else {
-    args.push("-x", "--audio-format", "mp3", "--audio-quality", "0");
-  }
-
+  const clientFallbacks = platform => {
+    if (platform === "youtube") return ["android,web_embedded", "web_embedded", "tv,web_safari"];
+    if (platform === "tiktok") return ["tiktok", "tiktok_embedded"];
+    return [null];
+  };
+  // YouTube web clients get "Sign in to confirm you're not a bot" checks;
+  // the android client is far more reliable from datacenter IPs.
+  const clients = clientFallbacks(job.platform);
+  const baseArgs = () => {
+    const a = [
+      "--no-playlist",
+      "--no-warnings",
+      "--newline",
+      "-f", format,
+      "-o", output,
+      "--extractor-retries", "3",
+      "--socket-timeout", "15",
+      "--retries", "5",
+      "--fragment-retries", "5",
+      "--sleep-interval", "2",
+      "--max-sleep-interval", "8",
+      url
+    ];
+    if (!isAudio) {
+      a.push("--merge-output-format", "mp4");
+    } else {
+      a.push("-x", "--audio-format", "mp3", "--audio-quality", "0");
+    }
+    return a;
+  };
+  const runOnce = args =>
+    new Promise((resolve, reject) => {
+      const child = spawn("yt-dlp", args, { stdio: ["ignore", "pipe", "pipe"] });
+      let stderr = "";
+      child.stdout.on("data", data => {
+        const text = data.toString();
+        const match = text.match(/(\d+(?:\.\d+)?)%/);
+        if (match) job.progress = Math.min(99, Number(match[1]));
+      });
+      child.stderr.on("data", data => {
+        stderr += data.toString();
+        process.stdout.write("[yt-dlp] " + data.toString().trim().slice(0, 200) + "\n");
+      });
+      child.on("error", reject);
+      child.on("close", code => {
+        if (code !== 0) return reject(new Error(stderr || `yt-dlp exited with ${code}`));
+        resolve(stderr);
+      });
+    });
+  const outputExists = () =>
+    fs
+      .readdirSync(DOWNLOAD_DIR)
+      .filter(f => f.startsWith(`${id}.`))
+      .map(f => path.join(DOWNLOAD_DIR, f));
   return new Promise((resolve, reject) => {
-    const child = spawn("yt-dlp", args, { stdio: ["ignore", "pipe", "pipe"] });
-    let stderr = "";
-
-    child.stdout.on("data", data => {
-      const text = data.toString();
-      const match = text.match(/(\d+(?:\.\d+)?)%/);
-      if (match) job.progress = Math.min(99, Number(match[1]));
-    });
-    child.stderr.on("data", data => {
-      stderr += data.toString();
-      process.stdout.write("[yt-dlp] " + data.toString().trim().slice(0, 200) + "\n");
-    });
-
-    child.on("error", reject);
-    child.on("close", code => {
-      if (code !== 0) return reject(new Error(stderr || `yt-dlp exited with ${code}`));
-
-      const candidates = fs.readdirSync(DOWNLOAD_DIR)
-        .filter(f => f.startsWith(`${id}.`))
-        .map(f => path.join(DOWNLOAD_DIR, f));
-
-      if (!candidates.length) return reject(new Error("Download completed but output file was not found"));
-
-      const file = candidates[0];
-      const stat = fs.statSync(file);
-
-      if (stat.size > MAX_FILE_SIZE) {
-        fs.unlinkSync(file);
-        return reject(new Error("File exceeds MAX_FILE_SIZE_MB"));
+    const tryClients = async attempts => {
+      let lastErr = null;
+      for (let i = 0; i < attempts; i++) {
+        const client = clients[i % clients.length];
+        const args = baseArgs();
+        if (client) {
+          args.push("--extractor-args", `${job.platform}:player_client=${client}`);
+        }
+        try {
+          const stderr = await runOnce(args);
+          const files = outputExists();
+          if (files.length) {
+            const file = files[0];
+            const stat = fs.statSync(file);
+            if (stat.size > MAX_FILE_SIZE) {
+              fs.unlinkSync(file);
+              reject(new Error("File exceeds MAX_FILE_SIZE_MB"));
+              return;
+            }
+            job.status = "completed";
+            job.progress = 100;
+            job.file = file;
+            job.size = stat.size;
+            job.expiresAt = Date.now() + JOB_TTL;
+            resolve();
+            return;
+          }
+        } catch (err) {
+          lastErr = err;
+          const msg = err.message || "";
+          // Bot check or transient failure → try the next client after a pause.
+          if (/(sign in|not a bot|reloaded|timed out|blocked|403|429)/i.test(msg) && i < attempts - 1) {
+            console.log("[download] retry with next client after bot-check/transient error");
+            await new Promise(r => setTimeout(r, 1500 + Math.random() * 2000));
+            continue;
+          }
+        }
+        if (i < attempts - 1) {
+          console.log("[download] attempt failed, sleeping before retry");
+          await new Promise(r => setTimeout(r, 2000 + Math.random() * 2000));
+        }
       }
-
-      job.status = "completed";
-      job.progress = 100;
-      job.file = file;
-      job.size = stat.size;
-      job.expiresAt = Date.now() + JOB_TTL;
-      resolve();
+      reject(lastErr || new Error("Download failed after all attempts"));
+    };
+    // YouTube: try several player clients in order (android first — it
+    // survives the "Sign in to confirm you're not a bot" check that the web
+    // client triggers from datacenter IPs). Other platforms use the default
+    // client. Each transient/bot-check failure retries with the next client.
+    tryClients(3).catch(err => {
+      // Surface the real yt-dlp error text so it shows in the queue.
+      const last = (err.message || "").trim();
+      job.error = last.slice(0, 500);
+      reject(err);
     });
   });
 }
