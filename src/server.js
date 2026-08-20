@@ -118,6 +118,81 @@ function validUrl(value) {
   return detectPlatform(value) !== null;
 }
 
+// Lightweight rotating proxy support: when YTDLP_PROXY is not set, the API
+// can try a short list of free HTTPS proxies so a single datacenter IP ban
+// does not block every download. Each proxy is verified once, cached, and
+// rotated in order; failures fall back to direct (no-proxy) access.
+const FREE_PROXY_LIST_URL = "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=5000&country=all&ssl=yes&anonymity=all";
+let cachedProxies = { list: [], at: 0, fetchedAt: 0 };
+
+async function getProxyList() {
+  if (cachedProxies.list.length && Date.now() - cachedProxies.fetchedAt < 10 * 60_000) return cachedProxies.list;
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    const res = await fetch(FREE_PROXY_LIST_URL, { signal: ctrl.signal });
+    clearTimeout(timer);
+    if (!res.ok) return [];
+    const text = await res.text();
+    const list = text
+      .split(/\r?\n/)
+      .map(l => l.trim())
+      .filter(l => /^\d+\.\d+\.\d+\.\d+:\d{2,5}$/.test(l))
+      .slice(0, 25);
+    cachedProxies = { list, at: 0, fetchedAt: Date.now() };
+    return list;
+  } catch {
+    return cachedProxies.list;
+  }
+}
+
+function probeProxy(proxyUrl) {
+  // TCP-level probe: open a socket through the proxy to any host. If the
+  // CONNECT handshake completes, the proxy is alive (regardless of whether
+  // the target eventually 403s).
+  return new Promise(resolve => {
+    try {
+      const u = new URL(proxyUrl);
+      const net = require("net");
+      const sock = net.connect(Number(u.port), u.hostname, () => {
+        sock.write(
+          `CONNECT ${u.hostname}:${u.port} HTTP/1.1\r\nHost: ${u.hostname}:${u.port}\r\n\r\n`
+        );
+      });
+      let buf = "";
+      sock.on("data", data => {
+        buf += data.toString();
+        if (/HTTP\/1\.\d 2\d\d/.test(buf)) {
+          sock.destroy();
+          resolve(true);
+        } else if (/HTTP\/1\.\d (?!2\d\d)/.test(buf) || buf.length > 200) {
+          sock.destroy();
+          resolve(false);
+        }
+      });
+      sock.on("error", () => resolve(false));
+      setTimeout(() => { sock.destroy(); resolve(false); }, 8000);
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+async function pickWorkingProxy() {
+  const env = process.env.YTDLP_PROXY || "";
+  if (env) return env;
+  const list = await getProxyList();
+  if (!list.length) return "";
+  // Try the next N cached proxies in rotation until one works.
+  for (let n = 0; n < Math.min(5, list.length); n++) {
+    const proxy = list[cachedProxies.at % list.length];
+    cachedProxies.at += 1;
+    const ok = await probeProxy(proxy);
+    if (ok) return `http://${proxy}`;
+  }
+  return "";
+}
+
 function safeName(name) {
   return String(name || "video").replace(/[^\w.\- ]+/g, "_").slice(0, 150);
 }
@@ -158,7 +233,8 @@ async function mediaInfo(url, type) {
       "--sleep-interval", "1",
       "--max-sleep-interval", "4",
     ];
-  const proxy = process.env.YTDLP_PROXY || "";
+  let proxy = process.env.YTDLP_PROXY || "";
+  if (!proxy) proxy = await pickWorkingProxy().catch(() => "");
   if (proxy) args.push("--proxy", proxy);
   args.push("--extractor-args", "youtube:player_skip=webpage,config,js");
   if (client) {
@@ -262,7 +338,8 @@ async function downloadAuthorized(url, job, type, quality) {
       for (let i = 0; i < attempts; i++) {
         const client = clients[i % clients.length];
         const args = baseArgs();
-        const proxy = process.env.YTDLP_PROXY || "";
+        let proxy = process.env.YTDLP_PROXY || "";
+        if (!proxy && i > 0) proxy = await pickWorkingProxy().catch(() => "");
         if (proxy) args.push("--proxy", proxy);
         if (client) {
           args.push("--extractor-args", `${job.platform}:player_client=${client}`);
@@ -568,7 +645,7 @@ setInterval(() => {
       jobs.delete(id);
     }
   }
-}, 60_000).unref();
+}, 60_000);
 
 app.use((err, req, res, next) => {
   console.error(err);
