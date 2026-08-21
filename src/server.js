@@ -558,6 +558,99 @@ function extractMediaInfo(info, platform) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// YouTube search — no API key required. Renders YouTube's search page with a
+// browser-like UA and pulls out video entries (id, title, channel, duration,
+// thumbnails) from the embedded ytInitialData JSON.
+// ---------------------------------------------------------------------------
+const UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+  "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+
+async function fetchYTSearchResults(query) {
+  const url =
+    "https://www.youtube.com/results?search_query=" +
+    encodeURIComponent(query);
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent": UA,
+      "Accept-Language": "en-US,en;q=0.9",
+      Cookie: "SOCS=CAI",
+    },
+  });
+  if (!res.ok)
+    throw new Error(`YouTube search request failed (${res.status})`);
+  const html = await res.text();
+
+  // ytInitialData is embedded in a script tag on every results page.
+  const m = html.match(/var ytInitialData = (\{.*?\});<\/script>/s);
+  if (!m) throw new Error("YouTube search response could not be parsed");
+
+  const data = JSON.parse(m[1]);
+  const items = [];
+  const walk = (node) => {
+    if (!node || typeof node !== "object") return;
+    const ri = node.richItemRenderer;
+    const vr = (ri && ri.content && ri.content.videoRenderer) || null;
+    if (vr) {
+      const videoId = vr.videoId;
+      const title = ((vr.title && vr.title.runs) || [])
+        .map(r => r.text)
+        .join("");
+      const channel = ((vr.ownerText && vr.ownerText.runs) || [])
+        .map(r => r.text)
+        .join("");
+      const views = ((vr.viewCountText && vr.viewCountText.simpleText) || "");
+      const published = ((vr.publishedTimeText &&
+        vr.publishedTimeText.simpleText) || "");
+      const duration = ((vr.lengthText && vr.lengthText.simpleText) || "");
+      const thumbs = (vr.thumbnail && vr.thumbnail.thumbnails) || [];
+      if (videoId && title) {
+        items.push({
+          videoId,
+          title,
+          channel,
+          views,
+          published,
+          duration,
+          thumbnail:
+            thumbs.sort((a, b) => (b.width || 0) - (a.width || 0))[0]?.url ||
+            `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+          url: `https://www.youtube.com/watch?v=${videoId}`
+        });
+      }
+    }
+    for (const key of Object.keys(node)) walk(node[key]);
+    if (Array.isArray(node)) node.forEach(walk);
+  };
+  walk(data);
+  return items;
+}
+
+app.get("/api/search", auth, async (req, res) => {
+  const query = (req.query.q || "").trim();
+  if (!query) return res.status(400).json({ success: false, error: "q is required" });
+  try {
+    const results = await fetchYTSearchResults(query);
+    res.json({ success: true, query, results: results.slice(0, 12) });
+  } catch (err) {
+    console.error("[search]", err.message);
+    res.status(422).json({ success: false, error: "Unable to search YouTube" });
+  }
+});
+
+app.post("/api/search", auth, async (req, res) => {
+  const query = ((req.body && req.body.q) || "").trim();
+  if (!query) return res.status(400).json({ success: false, error: "q is required" });
+  try {
+    const results = await fetchYTSearchResults(query);
+    res.json({ success: true, query, results: results.slice(0, 12) });
+  } catch (err) {
+    console.error("[search]", err.message);
+    res.status(422).json({ success: false, error: "Unable to search YouTube" });
+  }
+});
+
 app.post("/api/media/info", auth, async (req, res) => {
   const { url } = req.body || {};
   const platform = detectPlatform(url);
