@@ -590,8 +590,14 @@ async function fetchYTSearchResults(query) {
   const items = [];
   const walk = (node) => {
     if (!node || typeof node !== "object") return;
-    const ri = node.richItemRenderer;
-    const vr = (ri && ri.content && ri.content.videoRenderer) || null;
+    // videoRenderer may sit directly on the item (older layout) or under
+    // richItemRenderer.content (newer layout).
+    const vr =
+      node.videoRenderer ||
+      (node.richItemRenderer &&
+        node.richItemRenderer.content &&
+        node.richItemRenderer.content.videoRenderer) ||
+      null;
     if (vr) {
       const videoId = vr.videoId;
       const title = ((vr.title && vr.title.runs) || [])
