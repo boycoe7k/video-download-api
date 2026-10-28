@@ -296,34 +296,34 @@ async function mediaInfo(url, type) {
     return [null];
   };
   let lastErr = null;
-  for (const client of clientFallbacks(platform)) {
+  let proxy = process.env.YTDLP_PROXY || "";
+  for (const [attempt, client] of clientFallbacks(platform).entries()) {
     const args = [
       "--dump-single-json",
       "--no-playlist",
       "--skip-download",
       "--no-warnings",
-      "--extractor-retries", "5",
-      "--socket-timeout", "20",
-      "--sleep-interval", "1",
-      "--max-sleep-interval", "4",
+      "--extractor-retries", "2",
+      "--socket-timeout", "12",
     ];
-  let proxy = process.env.YTDLP_PROXY || "";
-  if (!proxy) proxy = await pickWorkingProxy().catch(() => "");
-  if (proxy) args.push("--proxy", proxy);
-  args.push("--extractor-args", "youtube:player_skip=webpage,config,js");
-  // player_client is YouTube-only; other platforms have no such argument.
-  if (client && platform === "youtube") {
-    args.push("--extractor-args", `youtube:player_client=${client}`);
-  }
-  args.push(url);
+    // Keep the common metadata path direct and fast. Proxy discovery can
+    // require several slow network probes, so only start it after a direct
+    // extraction attempt fails.
+    if (attempt > 0 && !proxy) proxy = await pickWorkingProxy().catch(() => "");
+    if (proxy) args.push("--proxy", proxy);
+    args.push("--extractor-args", "youtube:player_skip=webpage,config,js");
+    // player_client is YouTube-only; other platforms have no such argument.
+    if (client && platform === "youtube") {
+      args.push("--extractor-args", `youtube:player_client=${client}`);
+    }
+    args.push(url);
     try {
       const { stdout } = await runCommand("yt-dlp", args);
       return JSON.parse(stdout);
     } catch (err) {
       lastErr = err;
       const msg = err.message || "";
-      if (/(sign in|not a bot|reloaded|timed out|blocked|403|429)/i.test(msg)) {
-        await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
+      if (/(sign in|not a bot|reloaded|timed out|blocked|403|429|connection aborted|remote end closed)/i.test(msg)) {
         continue;
       }
       throw err;
@@ -514,14 +514,31 @@ app.post("/api/admin/keys/:key/enable", (req, res) => {
   res.json({ success: true, message: "Key enabled" });
 });
 
-app.get("/api/health", (req, res) => {
+const healthResponse = (req, res) => {
   res.json({
     success: true,
+    status: "operational",
     service: "video-download-api",
+    developer: "Boycoe Prime",
+    description: "Get video metadata and start authorized video or audio downloads from supported platforms.",
     platforms: PLATFORM_ORDER,
+    endpoints: {
+      health: { method: "GET", path: "/health", auth: false },
+      videoInfo: { method: "POST", path: "/api/media/info", auth: "x-api-key when API_KEYS is configured", body: { url: "video URL" } },
+      startDownload: { method: "POST", path: "/api/media/download", auth: "x-api-key when API_KEYS is configured", body: { url: "video URL", type: "video or audio", quality: "best or e.g. 720p" } },
+      jobStatus: { method: "GET", path: "/api/status/{jobId}", auth: "x-api-key when API_KEYS is configured" },
+      downloadFile: { method: "GET", path: "/api/download/{jobId}", auth: "x-api-key when API_KEYS is configured" }
+    },
+    links: {
+      whatsappChannel: "https://whatsapp.com/channel/0029VbBxPYN2kNFj3I1H1e0f",
+      developerWebsite: "https://netfy.co.zw"
+    },
+    uptimeSeconds: Math.floor(process.uptime()),
     time: new Date().toISOString()
   });
-});
+};
+app.get("/health", healthResponse);
+app.get("/api/health", healthResponse);
 
 // Non-sensitive diagnostics: whether a static proxy is configured, the
 // current commit-friendly build marker, and how many free proxies are
