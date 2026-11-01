@@ -238,3 +238,12 @@ A test script is included (`test_api.sh` in the project root of the repository, 
 ## Important implementation note
 
 This project deliberately does not implement mechanisms intended to bypass access controls, DRM, authentication, or restrictions. It is for content you are authorized to download.
+
+
+## Netfy API Platform and Netlify
+
+This repository now includes a Netlify-ready developer console (`site/`), a fixed-origin API gateway (`netlify/functions/`), and an expanded Express API. Netlify serves the console and proxies requests to the Docker-compatible backend; the actual media worker stays on a persistent host because it needs yt-dlp, FFmpeg, asynchronous jobs and file storage.
+
+See [`NETLIFY_PLATFORM.md`](NETLIFY_PLATFORM.md) for Netlify deployment, required environment variables, provider setup and API status. The new API catalog currently lists 26 modules. Implemented routes include GitHub repository/release lookup, IP information, current weather and currency rates. Credential-gated integrations are included for screenshots, Google Drive reads, allowlisted Telegram/SMS messaging, OpenAI image/TTS and Unsplash wallpaper search; each remains unavailable until its backend secret is configured. Planned/provider-limited APIs are labeled honestly in the console.
+
+Set `API_ORIGIN` in Netlify to the public HTTPS origin of the Docker backend. Store provider secrets in the backend host's secret store, never in Git or browser JavaScript. Download routes are for content the caller owns or is authorized to access; the platform does not implement additional access-control, DRM, or licensing bypasses.

@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
 require("dotenv").config();
+const platform = require("./platform");
 
 const app = express();
 app.use((req, res, next) => {
@@ -57,6 +58,8 @@ const limiter = rateLimit({
 });
 
 app.use("/api/", limiter);
+
+platform.register(app, auth);
 
 function auth(req, res, next) {
   // If no API_KEYS are configured, the API runs in open mode (no key
