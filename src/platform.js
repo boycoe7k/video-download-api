@@ -1,4 +1,13 @@
 const net = require("node:net");
+const rateLimit = require("express-rate-limit");
+
+const limited = requestsPerHour => rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: requestsPerHour,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { success: false, error: "This endpoint has reached its per-IP hourly limit" }
+});
 
 const catalog = [
   { id: "media-download", name: "Video & audio download", category: "Media", status: "ready", method: "POST", path: "/api/media/download", note: "Existing job-based API for supported platforms; use only content you own or may download." },
@@ -29,7 +38,7 @@ const catalog = [
   { id: "audio-transcription", name: "Audio transcription", category: "AI", status: "setup_required", method: "POST", path: "/api/ai/transcribe", note: "Needs a configured speech-to-text provider." }
 ];
 
-function register(app, auth) {
+function register(app, publicApi) {
   app.get("/api/platform/catalog", (_req, res) => {
     const configured = {
       "web-screenshot": Boolean(process.env.SCREENSHOTONE_ACCESS_KEY),
@@ -44,10 +53,10 @@ function register(app, auth) {
     res.json({ success: true, service: "Netfy API Platform", total: apis.length, apis });
   });
 
-  app.get("/api/ip", auth, (req, res) => lookupIp(req, res, req.query.address));
-  app.get("/api/ip/:address", auth, (req, res) => lookupIp(req, res, req.params.address));
+  app.get("/api/ip", publicApi, (req, res) => lookupIp(req, res, req.query.address));
+  app.get("/api/ip/:address", publicApi, (req, res) => lookupIp(req, res, req.params.address));
 
-  app.get("/api/github/:owner/:repo", auth, async (req, res) => {
+  app.get("/api/github/:owner/:repo", publicApi, async (req, res) => {
     const { owner, repo } = req.params;
     if (!/^[A-Za-z0-9-]{1,39}$/.test(owner) || !/^[A-Za-z0-9_.-]{1,100}$/.test(repo)) {
       return res.status(400).json({ success: false, error: "Invalid GitHub owner or repository" });
@@ -60,7 +69,7 @@ function register(app, auth) {
     }
   });
 
-  app.get("/api/github/:owner/:repo/releases/latest", auth, async (req, res) => {
+  app.get("/api/github/:owner/:repo/releases/latest", publicApi, async (req, res) => {
     const { owner, repo } = req.params;
     if (!/^[A-Za-z0-9-]{1,39}$/.test(owner) || !/^[A-Za-z0-9_.-]{1,100}$/.test(repo)) {
       return res.status(400).json({ success: false, error: "Invalid GitHub owner or repository" });
@@ -83,7 +92,7 @@ function register(app, auth) {
     }
   });
 
-  app.post("/api/screenshot", auth, async (req, res) => {
+  app.post("/api/screenshot", publicApi, limited(6), async (req, res) => {
     const key = process.env.SCREENSHOTONE_ACCESS_KEY;
     const target = safeHttpsUrl(req.body?.url);
     if (!target) return res.status(400).json({ success: false, error: "A public HTTPS URL is required" });
@@ -105,7 +114,7 @@ function register(app, auth) {
     } catch { res.status(502).json({ success: false, error: "Screenshot provider timed out or is unavailable" }); }
   });
 
-  app.get("/api/drive/files/:id", auth, async (req, res) => {
+  app.get("/api/drive/files/:id", publicApi, limited(20), async (req, res) => {
     const token = process.env.GOOGLE_DRIVE_ACCESS_TOKEN;
     if (!/^[A-Za-z0-9_-]{8,200}$/.test(req.params.id)) return res.status(400).json({ success: false, error: "Invalid Drive file ID" });
     if (!token) return setupRequired(res, "Google Drive OAuth access token is not configured");
@@ -123,7 +132,7 @@ function register(app, auth) {
     }
   });
 
-  app.post("/api/telegram/send", auth, async (req, res) => {
+  app.post("/api/telegram/send", publicApi, limited(10), async (req, res) => {
     const token = process.env.TELEGRAM_BOT_TOKEN;
     const allowed = (process.env.TELEGRAM_ALLOWED_CHAT_IDS || "").split(",").map(x => x.trim()).filter(Boolean);
     const chatId = String(req.body?.chatId || "");
@@ -139,7 +148,7 @@ function register(app, auth) {
     } catch { res.status(502).json({ success: false, error: "Telegram is unavailable" }); }
   });
 
-  app.post("/api/sms/send", auth, async (req, res) => {
+  app.post("/api/sms/send", publicApi, limited(3), async (req, res) => {
     const { TWILIO_ACCOUNT_SID: sid, TWILIO_AUTH_TOKEN: token, TWILIO_FROM: from } = process.env;
     const allowed = (process.env.SMS_ALLOWED_TO || "").split(",").map(x => x.trim()).filter(Boolean);
     const to = String(req.body?.to || "");
@@ -157,7 +166,7 @@ function register(app, auth) {
     } catch { res.status(502).json({ success: false, error: "SMS provider is unavailable" }); }
   });
 
-  app.post("/api/ai/image", auth, async (req, res) => {
+  app.post("/api/ai/image", publicApi, limited(2), async (req, res) => {
     const key = process.env.AI_PROVIDER_API_KEY;
     const prompt = String(req.body?.prompt || "").trim();
     if (!key) return setupRequired(res, "AI_PROVIDER_API_KEY is not configured on the backend");
@@ -170,7 +179,7 @@ function register(app, auth) {
     } catch { res.status(502).json({ success: false, error: "Image provider timed out or is unavailable" }); }
   });
 
-  app.post("/api/ai/speech", auth, async (req, res) => {
+  app.post("/api/ai/speech", publicApi, limited(8), async (req, res) => {
     const key = process.env.AI_PROVIDER_API_KEY;
     const input = String(req.body?.text || "").trim();
     if (!key) return setupRequired(res, "AI_PROVIDER_API_KEY is not configured on the backend");
@@ -184,7 +193,7 @@ function register(app, auth) {
     } catch { res.status(502).json({ success: false, error: "Speech provider timed out or is unavailable" }); }
   });
 
-  app.get("/api/wallpapers", auth, async (req, res) => {
+  app.get("/api/wallpapers", publicApi, async (req, res) => {
     const key = process.env.UNSPLASH_ACCESS_KEY;
     if (!key) return setupRequired(res, "UNSPLASH_ACCESS_KEY is not configured");
     const query = String(req.query.q || "wallpaper").slice(0, 80);
@@ -200,7 +209,7 @@ function register(app, auth) {
     } catch { res.status(502).json({ success: false, error: "Wallpaper provider is unavailable" }); }
   });
 
-  app.get("/api/weather", auth, async (req, res) => {
+  app.get("/api/weather", publicApi, async (req, res) => {
     const lat = Number(req.query.lat), lon = Number(req.query.lon);
     if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lon) || lon < -180 || lon > 180) return res.status(400).json({ success: false, error: "lat and lon must be valid coordinates" });
     try {
@@ -215,7 +224,7 @@ function register(app, auth) {
     } catch { res.status(502).json({ success: false, error: "Weather provider timed out or is unavailable" }); }
   });
 
-  app.get("/api/currency", auth, async (req, res) => {
+  app.get("/api/currency", publicApi, async (req, res) => {
     const from = String(req.query.from || "USD").toUpperCase();
     const to = String(req.query.to || "EUR").toUpperCase();
     if (!/^[A-Z]{3}$/.test(from) || !/^[A-Z]{3}$/.test(to)) return res.status(400).json({ success: false, error: "from and to must be ISO-style 3-letter currency codes" });

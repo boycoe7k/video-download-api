@@ -15,7 +15,7 @@
  *
  * Setup:
  *   1. npm install whatsapp-web.js qrcode-terminal
- *   2. Fill in API_URL and API_KEY below
+ *   2. Set API_URL below if your API has a custom backend URL
  *   3. node bot.js  (scan the QR code once)
  *
  * WhatsApp Web is automated with whatsapp-web.js (the most common free option).
@@ -31,7 +31,6 @@ const qrcode = require("qrcode-terminal");
 // CONFIG — fill these in
 // ---------------------------------------------------------------------------
 const API_URL = "https://video-download-api-l5m6.onrender.com";
-const API_KEY = process.env.API_KEY || ""; // set X-API-KEY header (leave "" if open mode)
 
 const POLL_INTERVAL_MS = 3000; // how often to check job status
 const MAX_POLL_ATTEMPTS = 120; // give up after ~6 min
@@ -42,7 +41,6 @@ const MAX_SEARCH_RESULTS = 5;
 // ---------------------------------------------------------------------------
 const headers = {
   "Content-Type": "application/json",
-  ...(API_KEY ? { "X-API-KEY": API_KEY } : {}),
 };
 
 async function apiInfo(url) {

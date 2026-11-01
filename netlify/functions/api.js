@@ -1,5 +1,5 @@
 const MAX_RESPONSE_BYTES = 4_500_000;
-const STRIP_HEADERS = new Set(["host", "content-length", "connection", "accept-encoding"]);
+const STRIP_HEADERS = new Set(["host", "content-length", "connection", "accept-encoding", "x-api-key", "x-admin-key"]);
 
 exports.handler = async (event) => {
   const origin = (process.env.API_ORIGIN || "").replace(/\/+$/, "");

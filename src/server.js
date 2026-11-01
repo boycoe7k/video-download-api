@@ -17,7 +17,7 @@ app.use((req, res, next) => {
   );
   res.header(
     "Access-Control-Allow-Headers",
-    "Content-Type, x-api-key, x-admin-key"
+    "Content-Type"
   );
   res.header("Access-Control-Max-Age", "3600");
   if (req.method === "OPTIONS") return res.sendStatus(204);
@@ -27,10 +27,6 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: "1mb" }));
 
 const PORT = Number(process.env.PORT || 3000);
-const API_KEYS = (process.env.API_KEYS || "")
-  .split(",")
-  .map(k => k.trim())
-  .filter(Boolean);
 // Render sets RENDER_EXTERNAL_URL (https://<service>.onrender.com). Fall back
 // to localhost only when no external URL is advertised.
 const BASE_URL =
@@ -38,10 +34,6 @@ const BASE_URL =
   process.env.RENDER_EXTERNAL_URL ||
   `http://localhost:${PORT}`;
 
-const keyStats = new Map(API_KEYS.map(key => [
-  key,
-  { enabled: true, requests: 0, lastUsedAt: null }
-]));
 const DOWNLOAD_DIR = path.resolve(process.env.DOWNLOAD_DIR || "./storage");
 const MAX_FILE_SIZE = Number(process.env.MAX_FILE_SIZE_MB || 100) * 1024 * 1024;
 const JOB_TTL = Number(process.env.JOB_TTL_SECONDS || 3600) * 1000;
@@ -59,29 +51,10 @@ const limiter = rateLimit({
 
 app.use("/api/", limiter);
 
-platform.register(app, auth);
+platform.register(app, publicApi);
 
-function auth(req, res, next) {
-  // If no API_KEYS are configured, the API runs in open mode (no key
-  // required). When keys are configured, only valid enabled keys pass.
-  if (!API_KEYS.length) {
-    req.apiKey = null;
-    return next();
-  }
-
-  const supplied = req.get("x-api-key") || "";
-  if (!/^Nexora_[A-Za-z0-9_-]{12,}$/.test(supplied)) {
-    return res.status(401).json({ success: false, error: "Invalid API key" });
-  }
-
-  const stats = keyStats.get(supplied);
-  if (!stats || !stats.enabled) {
-    return res.status(401).json({ success: false, error: "Invalid or disabled API key" });
-  }
-
-  stats.requests += 1;
-  stats.lastUsedAt = new Date().toISOString();
-  req.apiKey = supplied;
+function publicApi(_req, _res, next) {
+  // Public APIs do not require consumer keys; abuse control is rate-limit based.
   next();
 }
 
@@ -472,65 +445,20 @@ async function downloadAuthorized(url, job, type, quality) {
   });
 }
 
-app.get("/api/admin/keys", (req, res) => {
-  const adminKey = process.env.ADMIN_KEY || "";
-  if (!adminKey || (req.get("x-admin-key") || "") !== adminKey) {
-    return res.status(401).json({ success: false, error: "Invalid admin key" });
-  }
-
-  res.json({
-    success: true,
-    keys: API_KEYS.map(key => ({
-      key: key.slice(0, 10) + "…",
-      enabled: keyStats.get(key)?.enabled ?? false,
-      requests: keyStats.get(key)?.requests ?? 0,
-      lastUsedAt: keyStats.get(key)?.lastUsedAt ?? null
-    }))
-  });
-});
-
-app.post("/api/admin/keys/:key/disable", (req, res) => {
-  const adminKey = process.env.ADMIN_KEY || "";
-  if (!adminKey || (req.get("x-admin-key") || "") !== adminKey) {
-    return res.status(401).json({ success: false, error: "Invalid admin key" });
-  }
-
-  const key = req.params.key;
-  const stats = keyStats.get(key);
-  if (!stats) return res.status(404).json({ success: false, error: "Key not found" });
-
-  stats.enabled = false;
-  res.json({ success: true, message: "Key disabled" });
-});
-
-app.post("/api/admin/keys/:key/enable", (req, res) => {
-  const adminKey = process.env.ADMIN_KEY || "";
-  if (!adminKey || (req.get("x-admin-key") || "") !== adminKey) {
-    return res.status(401).json({ success: false, error: "Invalid admin key" });
-  }
-
-  const key = req.params.key;
-  const stats = keyStats.get(key);
-  if (!stats) return res.status(404).json({ success: false, error: "Key not found" });
-
-  stats.enabled = true;
-  res.json({ success: true, message: "Key enabled" });
-});
-
 const healthResponse = (req, res) => {
   res.json({
     success: true,
     status: "operational",
-    service: "video-download-api",
+    service: "Netfy API Platform",
     developer: "Boycoe Prime",
-    description: "Get video metadata and start authorized video or audio downloads from supported platforms.",
+    description: "Public, rate-limited API platform for authorized media jobs and provider integrations. No caller API key is required.",
     platforms: PLATFORM_ORDER,
     endpoints: {
-      health: { method: "GET", path: "/health", auth: false },
-      videoInfo: { method: "POST", path: "/api/media/info", auth: "x-api-key when API_KEYS is configured", body: { url: "video URL" } },
-      startDownload: { method: "POST", path: "/api/media/download", auth: "x-api-key when API_KEYS is configured", body: { url: "video URL", type: "video or audio", quality: "best or e.g. 720p" } },
-      jobStatus: { method: "GET", path: "/api/status/{jobId}", auth: "x-api-key when API_KEYS is configured" },
-      downloadFile: { method: "GET", path: "/api/download/{jobId}", auth: "x-api-key when API_KEYS is configured" }
+      health: { method: "GET", path: "/health", keyRequired: false },
+      videoInfo: { method: "POST", path: "/api/media/info", keyRequired: false, body: { url: "video URL" } },
+      startDownload: { method: "POST", path: "/api/media/download", keyRequired: false, body: { url: "video URL", type: "video or audio", quality: "best or e.g. 720p" } },
+      jobStatus: { method: "GET", path: "/api/status/{jobId}", keyRequired: false },
+      downloadFile: { method: "GET", path: "/api/download/{jobId}", keyRequired: false }
     },
     links: {
       whatsappChannel: "https://whatsapp.com/channel/0029VbBxPYN2kNFj3I1H1e0f",
@@ -653,7 +581,7 @@ async function fetchYTSearchResults(query) {
   return items;
 }
 
-app.get("/api/search", auth, async (req, res) => {
+app.get("/api/search", publicApi, async (req, res) => {
   const query = (req.query.q || "").trim();
   if (!query) return res.status(400).json({ success: false, error: "q is required" });
   try {
@@ -665,7 +593,7 @@ app.get("/api/search", auth, async (req, res) => {
   }
 });
 
-app.post("/api/search", auth, async (req, res) => {
+app.post("/api/search", publicApi, async (req, res) => {
   const query = ((req.body && req.body.q) || "").trim();
   if (!query) return res.status(400).json({ success: false, error: "q is required" });
   try {
@@ -677,7 +605,7 @@ app.post("/api/search", auth, async (req, res) => {
   }
 });
 
-app.post("/api/media/info", auth, async (req, res) => {
+app.post("/api/media/info", publicApi, async (req, res) => {
   const { url } = req.body || {};
   const platform = detectPlatform(url);
   if (!platform) {
@@ -697,7 +625,7 @@ app.post("/api/media/info", auth, async (req, res) => {
 });
 
 // Legacy alias kept for YouTube-only callers
-app.post("/api/youtube/info", auth, async (req, res) => {
+app.post("/api/youtube/info", publicApi, async (req, res) => {
   const { url } = req.body || {};
   if (!detectPlatform(url) || detectPlatform(url) !== "youtube") {
     return res.status(400).json({ success: false, error: "A valid YouTube URL is required" });
@@ -711,7 +639,7 @@ app.post("/api/youtube/info", auth, async (req, res) => {
   }
 });
 
-app.post("/api/media/download", auth, async (req, res) => {
+app.post("/api/media/download", publicApi, async (req, res) => {
   const { url, type = "video", quality = "720p" } = req.body || {};
 
   const platform = detectPlatform(url);
@@ -762,7 +690,7 @@ app.post("/api/media/download", auth, async (req, res) => {
 });
 
 // Legacy alias kept for YouTube-only callers
-app.post("/api/youtube/download", auth, async (req, res) => {
+app.post("/api/youtube/download", publicApi, async (req, res) => {
   const { url, type = "video", quality = "720p" } = req.body || {};
 
   if (detectPlatform(url) !== "youtube") {
@@ -808,7 +736,7 @@ app.post("/api/youtube/download", auth, async (req, res) => {
   });
 });
 
-app.get("/api/status/:id", auth, (req, res) => {
+app.get("/api/status/:id", publicApi, (req, res) => {
   const job = jobs.get(req.params.id);
   if (!job) return res.status(404).json({ success: false, error: "Job not found" });
 
@@ -832,7 +760,7 @@ app.get("/api/status/:id", auth, (req, res) => {
   res.json(result);
 });
 
-app.get("/api/download/:id", auth, (req, res) => {
+app.get("/api/download/:id", publicApi, (req, res) => {
   const job = jobs.get(req.params.id);
   if (!job || job.status !== "completed" || !job.file) {
     return res.status(404).json({ success: false, error: "File is not available" });

@@ -81,17 +81,12 @@ function printResult(element, data) { element.textContent = JSON.stringify(data,
 
 document.querySelector("#search").addEventListener("input", renderCards);
 document.querySelector("#category").addEventListener("change", renderCards);
-function authHeaders() {
-  const key = document.querySelector("#api-key").value.trim();
-  return key ? { "x-api-key": key } : {};
-}
-
 document.querySelector("#ip-run").addEventListener("click", async () => {
   const address = document.querySelector("#ip-input").value.trim();
   const out = document.querySelector("#ip-result");
   out.textContent = "Loading…";
   try {
-    const response = await fetch(`${API}/ip${address ? `/${encodeURIComponent(address)}` : ""}`, { headers: authHeaders() });
+    const response = await fetch(`${API}/ip${address ? `/${encodeURIComponent(address)}` : ""}`);
     printResult(out, await response.json());
   } catch { out.textContent = "Request failed. Connect the API backend to Netlify first."; }
 });
@@ -102,12 +97,12 @@ document.querySelector("#repo-run").addEventListener("click", async () => {
   if (parts.length !== 2 || parts.some(part => !part)) { out.textContent = 'Enter owner/repository, for example "nodejs/node".'; return; }
   out.textContent = "Loading…";
   try {
-    const response = await fetch(`${API}/github/${encodeURIComponent(parts[0])}/${encodeURIComponent(parts[1])}/releases/latest`, { headers: authHeaders() });
+    const response = await fetch(`${API}/github/${encodeURIComponent(parts[0])}/${encodeURIComponent(parts[1])}/releases/latest`);
     printResult(out, await response.json());
   } catch { out.textContent = "Request failed. Connect the API backend to Netlify first."; }
 });
 document.querySelector("#copy-command").addEventListener("click", async event => {
-  const text = 'curl "https://YOUR-SITE.netlify.app/api/github/nodejs/node/releases/latest" \\\n  -H "x-api-key: YOUR_API_KEY"';
+  const text = 'curl "https://YOUR-SITE.netlify.app/api/github/nodejs/node/releases/latest"';
   try { await navigator.clipboard.writeText(text); event.target.textContent = "COPIED"; setTimeout(() => event.target.textContent = "COPY", 1500); } catch { event.target.textContent = "SELECT TEXT"; }
 });
 

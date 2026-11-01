@@ -20,8 +20,10 @@ Credential-gated routes are implemented for screenshot generation (`POST /api/sc
 
 The console lists 26 modules. Modules marked planned or provider-limited are clearly identified and are not falsely presented as implemented. Google Play app downloads are not provided; the catalog is limited to authorized listing/metadata workflows. X/Twitter, MediaFire and music downloads must use provider-authorized or licensed access. Do not use these APIs to bypass paywalls, DRM, login requirements, platform rate limits or access controls. The existing media downloader is for content the caller owns or is authorized to download.
 
-## Authentication and secrets
+## No API keys for callers
 
-Set `API_KEYS` and `ADMIN_KEY` on the backend. Add `GITHUB_TOKEN`, `SCREENSHOTONE_ACCESS_KEY`, `GOOGLE_DRIVE_ACCESS_TOKEN`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_IDS`, Twilio credentials plus `SMS_ALLOWED_TO`, `AI_PROVIDER_API_KEY`, and/or `UNSPLASH_ACCESS_KEY` only when enabling each integration. Store them as host environment secrets; never commit real keys or place provider credentials in browser code. The API console's key field is held in page memory only and is not written to local storage.
+Public API routes do not use consumer API keys, account keys, or admin-key headers. Clients call endpoints directly and are rate-limited by IP (30 requests per minute by default). The Netlify gateway strips legacy `x-api-key` and `x-admin-key` headers instead of forwarding them.
+
+Some upstream providers require credentials owned by the platform operator. These are optional server-side integration credentials, stored only in the backend host's secret store—not API keys that callers create or send. Add `GITHUB_TOKEN`, `SCREENSHOTONE_ACCESS_KEY`, `GOOGLE_DRIVE_ACCESS_TOKEN`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_IDS`, Twilio credentials plus `SMS_ALLOWED_TO`, `AI_PROVIDER_API_KEY`, and/or `UNSPLASH_ACCESS_KEY` only when enabling each provider integration. Never commit these values or place them in browser code.
 
 The Google Drive endpoint uses a backend-provided OAuth access token and only returns data that token is permitted to read. For a multi-user production product, replace this single-service-token setup with a full per-user OAuth consent and token-refresh flow before exposing the Drive integration to customers.
